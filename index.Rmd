@@ -1,0 +1,123 @@
+---
+title: "The Riddler: King Auric (June 19, 2020)"
+author: Maxim Nazarov
+output: 
+  rmarkdown::html_document:
+    theme: readable
+---
+```{r echo = FALSE}
+library(ggplot2)
+theme_set(theme_minimal() + theme(panel.grid.minor = element_blank()))
+```
+
+## Question
+
+From https://fivethirtyeight.com/features/can-you-flip-the-magic-coin/:
+
+> King Auric adored his most prized possession: a set of perfect spheres of solid gold. There was one of each size, with diameters of 1 centimeter, 2 centimeters, 3 centimeters, and so on. Their brilliant beauty brought joy to his heart. After many years, he felt the time had finally come to pass the golden spheres down to the next generation — his three children.
+>
+> He decided it was best to give each child precisely one-third of the total gold by weight, but he had a difficult time determining just how to do that. After some trial and error, he managed to divide his spheres into three groups of equal weight. He was further amused when he realized that his collection contained the minimum number of spheres needed for this division. How many golden spheres
+> did King Auric have?
+
+## Solution
+
+First some observations:
+
+1. A sphere's weight is proportional to the cube of the diameter (with a constant = $\pi$/6), so for simplicity we will be working with the sequence $1^3, 2^3, 3^3, \dots$
+2. Since we are working with integer weights now, the sum of all spheres weights must be divisible by 3. 
+3. Looking at the start of the sequence, we see that the largest sphere is too heavy, so a further condition is that the largest sphere's weight must be less than or equal to 1/3 of the total weight.
+
+We look at the first several possible collections of spheres, to see when condition (3) becomes satisfied:
+
+```{r, echo = FALSE}
+n <- 24
+diams <- 1:n
+
+dat <- data.frame(diams = seq_len(n))
+dat$spheres <- dat$diams^3
+dat$weights <- cumsum(dat$spheres)
+dat$possible <- (dat$weights %% 3 == 0)
+```
+ 
+```{r, echo = FALSE, warning = FALSE}
+ggplot(data = dat[dat$possible, ], aes(diams, weights)) + 
+    geom_line(col = 'gray') + 
+    geom_point() + 
+    geom_point(data = dat, aes(y = 3*spheres), col = "red") + 
+    scale_x_continuous(breaks = dat$diams, name = "largest sphere diameter", limits = c(2,n)) +
+    scale_y_log10(breaks = dat$weights[dat$possible], limits = range(dat$weights[dat$possible]), "total weight") +
+    ggtitle(label = "Total weight of the spheres depending on the diameter of the largest one", subtitle = "Red dots indicate 3x the weight of the largest sphere")
+```
+
+From the plot we see that the minimal possible number of spheres in the set is 11.
+
+Now, in addition to the above conditions, we must be able to split the set into 3 subsets of equal total weight. To check that, let's try a "brute-force" approach: 
+
+For a given number of spheres $n$, the total spheres' weight in each of the 3 subsets must be equal to $\frac{1}{3}\sum_{x=1}^nx^3$. We can go through all $2^n$ possible subsets and calculate the total weight for each. If this weight matches the above value, we call it a "good" subset. Then we'd keep only those $n$'s for which the number of good subsets is at least 3. 
+<!-- The next step would be to check if there are 3 subsets that form a partition of the whole set. -->
+
+Here is a function that would find all good subsets for a given $n$:
+```{r}
+goodSubsets <- function(n) {
+  spheres <- seq_len(n)^3
+  total <- sum(spheres)
+  share <- total/3
+  
+  # generate all possible combinations
+  subsets <- expand.grid(rep(list(c(TRUE, FALSE)), n))
+  # calculate possible sums and check if their total weight is equal to `share`
+  subsets[(apply(subsets, 1, function(row) sum(spheres[row]))) == share, ]
+}
+```
+
+We run it on our candidate $n$'s: $11, 12, 14, 15, 17, \dots$ until we have at least 3 subsets:
+```{r}
+possibleN <- dat$diams[dat$possible & dat$diams>=11]
+idx <- 1
+while(nrow(goodSubsets(possibleN[idx])) < 3)
+  idx <- idx + 1
+possibleN[idx]
+```
+So now we know that there must be at least 17 spheres in the set. Here are the numbers of good subsets for the first several possible set sizes:
+
+```{r, cache = TRUE}
+possibleN <- tail(possibleN, -idx+1)
+nSubsets <- sapply(possibleN, function(n) nrow(goodSubsets(n)))
+knitr::kable(data.frame(n = possibleN, `good subsets` = nSubsets))
+```
+
+The next step is to check whether any 3 of the "good" subsets form a partition of the set. We apply a "brute-force" again here: we list all possible combinations of 3 subsets out of all good subsets, and check for each such combination whether it forms a partition. We apply this algorithm for the remaining candidate $n$'s: $17, 18, 20, 21, 23, \dots$ until we find a match (hoping it will not take too long...):
+
+```{r, cache = TRUE}
+findPartition <- function(n) {
+  cmb <- goodSubsets(n)
+  combs <- combn(nrow(cmb), 3)  # all possible combinations
+  which(apply(combs, 2, function(x) all(colSums(cmb[x, ]) == 1))) # find which ones are partitions
+}
+ 
+idx <- 1
+while(!length(partitionIdx <- findPartition(possibleN[idx])))
+  idx <- idx + 1
+finalN <- possibleN[idx]
+```
+
+We get our match at $n = `r finalN`$!
+
+And the partition is the following:
+```{r, cache = TRUE, results = "asis"}
+spheres <- seq_len(finalN)^3
+subsets <- goodSubsets(finalN)
+combs <- combn(nrow(subsets), 3)  # all possible combinations of 3 subsets
+
+out <- apply(subsets[combs[, partitionIdx], ], 1, function(x) spheres[as.logical(x)]^(1/3))
+cat(paste0(1:3, ". ", lapply(out, paste, collapse = " "), collapse = "\n"))
+```
+
+A sanity check that the weights are indeed equal, also computing the exact weight using gold density:
+```{r}
+(son <- unique(sapply(out, function(x) sum(4/3*pi*(x/2)^3*19.3))))
+```
+
+So each Auric's son would get ~`r round(son/1000,1)`kg of gold (worth ~$450K nowadays).
+
+
